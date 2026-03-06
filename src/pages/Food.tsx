@@ -3,8 +3,19 @@ import { useEffect, useState } from 'react'
 import Loader from '../components/loader'
 import './Home.css'
 
+/** Safely extract a renderable string from a plain number/string OR an object
+ *  shaped like { value, unit, daily_value_percent } that the AI sometimes returns. */
+function extractValue(n: any): string | null {
+  if (n === null || n === undefined) return null
+  if (typeof n === 'object') {
+    const v = n.value ?? n.amount ?? n.quantity
+    return v !== undefined && v !== null ? String(v) : null
+  }
+  return String(n)
+}
+
 function formatNumber(n: any) {
-  return n === null || n === undefined ? '—' : String(n)
+  return extractValue(n) ?? '—'
 }
 
 export default function Food() {
@@ -171,7 +182,9 @@ export default function Food() {
   function getMetric(key: string) {
     // try multiple shapes
     const per100 = nf.per_100g ?? nf.per100g ?? nf.per100 ?? nf
-    return per100 ? (per100[key] ?? per100[`${key}_g`] ?? per100[`${key}_mg`] ?? per100[`${key}_kcal`]) : undefined
+    const raw = per100 ? (per100[key] ?? per100[`${key}_g`] ?? per100[`${key}_mg`] ?? per100[`${key}_kcal`]) : undefined
+    // unwrap object-shaped values like { value, unit, daily_value_percent }
+    return extractValue(raw) ?? undefined
   }
   const energy100 = getMetric('energy_kcal') ?? getMetric('energy') ?? getMetric('calories')
   const protein100 = getMetric('protein') ?? getMetric('protein_g')
@@ -254,7 +267,7 @@ export default function Food() {
           ) : (
             <table className="nf-table">
               <tbody>
-                <tr><td>Serving Size</td><td>{nf.serving_size ?? '—'}</td></tr>
+                <tr><td>Serving Size</td><td>{formatNumber(nf.serving_size)}</td></tr>
                 <tr><td>Servings Per Container</td><td>{formatNumber(nf.servings_per_container)}</td></tr>
                 <tr><td>Calories</td><td>{formatNumber(nf.calories)}</td></tr>
                 <tr><td>Total Fat (g)</td><td>{formatNumber(nf.total_fat_g)}</td></tr>

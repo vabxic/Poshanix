@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { auth, onAuthChange, updateProfile, uploadFile } from '../lib/firebase'
 import { useTheme } from '../lib/useTheme'
 import ThemeSwitch from '../components/Switch'
 import Loader from '../components/loader'
@@ -17,11 +17,12 @@ function Onboarding() {
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data.user) { navigate('/auth'); return }
-      setUserId(data.user.id)
+    const unsubscribe = onAuthChange((currentUser) => {
+      if (!currentUser) { navigate('/auth'); return }
+      setUserId(currentUser.uid)
       setChecking(false)
     })
+    return () => unsubscribe()
   }, [navigate])
 
   /* step control */
@@ -73,20 +74,14 @@ function Onboarding() {
     if (hasMedicalHistory && medicalFile && userId) {
       setUploadingDoc(true)
       const ext = medicalFile.name.split('.').pop()
-      const path = `${userId}/medical_${Date.now()}.${ext}`
-      const { error: upErr } = await supabase.storage
-        .from('medical-docs')
-        .upload(path, medicalFile, { upsert: true })
-      setUploadingDoc(false)
-      if (upErr) {
-        /* storage bucket may not exist yet – save without URL */
-        console.warn('Upload failed (bucket may not exist):', upErr.message)
-      } else {
-        const { data: urlData } = supabase.storage
-          .from('medical-docs')
-          .getPublicUrl(path)
-        docUrl = urlData.publicUrl
+      const path = `medical-docs/${userId}/medical_${Date.now()}.${ext}`
+      try {
+        docUrl = await uploadFile(path, medicalFile)
+      } catch (upErr: any) {
+        /* storage may not be configured yet */
+        console.warn('Upload failed:', upErr.message)
       }
+      setUploadingDoc(false)
     }
 
     /* stash doc URL for final save */
@@ -118,17 +113,13 @@ function Onboarding() {
       if (workoutLevel) payload.workout_level = workoutLevel
     }
 
-    const { error: dbErr } = await supabase
-      .from('profiles')
-      .update(payload)
-      .eq('id', userId)
-
-    setSaving(false)
-
-    if (dbErr) {
-      setError('Failed to save: ' + dbErr.message)
-    } else {
+    try {
+      await updateProfile(userId, payload)
       navigate('/home')
+    } catch (dbErr: any) {
+      setError('Failed to save: ' + dbErr.message)
+    } finally {
+      setSaving(false)
     }
   }
 

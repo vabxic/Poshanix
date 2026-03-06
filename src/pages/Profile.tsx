@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { auth, getProfile, updateProfile, uploadFile } from '../lib/firebase'
+import { updateProfile as updateAuthProfile } from 'firebase/auth'
 import { useTheme } from '../lib/useTheme'
 import ThemeSwitch from '../components/Switch'
 import Loader from '../components/loader'
@@ -87,20 +88,17 @@ function Profile() {
 
   /* ---------- load ---------- */
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) { navigate('/auth'); return }
-      const uid = data.user.id
+    const loadProfile = async () => {
+      const currentUser = auth.currentUser
+      if (!currentUser) { navigate('/auth'); return }
+      const uid = currentUser.uid
       setUserId(uid)
 
-      const { data: p } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', uid)
-        .single()
+      const p = await getProfile(uid)
 
       const filled: ProfileData = {
-        full_name:          p?.full_name        ?? data.user.user_metadata?.full_name ?? '',
-        email:              p?.email            ?? data.user.email ?? '',
+        full_name:          p?.full_name        ?? currentUser.displayName ?? '',
+        email:              p?.email            ?? currentUser.email ?? '',
         age:                p?.age              != null ? String(p.age) : '',
         gender:             p?.gender           ?? '',
         weight:             p?.weight           != null ? String(p.weight) : '',
@@ -113,14 +111,15 @@ function Profile() {
         workout_level:      p?.workout_level    ?? '',
         has_medical_history: p?.has_medical_history ?? null,
         medical_doc_url:    p?.medical_doc_url  ?? '',
-        avatar_url:         p?.avatar_url       ?? data.user.user_metadata?.avatar_url ?? '',
+        avatar_url:         p?.avatar_url       ?? currentUser.photoURL ?? '',
         bmi:                p?.bmi              ?? null,
         bmr:                p?.bmr              ?? null,
       }
       setForm(filled)
       setOriginal(filled)
       setLoading(false)
-    })
+    }
+    loadProfile()
   }, [navigate])
 
   const set = <K extends keyof ProfileData>(key: K, val: ProfileData[K]) =>
@@ -138,19 +137,13 @@ function Profile() {
     if (newMedicalFile) {
       setUploadingDoc(true)
       const ext = newMedicalFile.name.split('.').pop()
-      const path = `${userId}/medical_${Date.now()}.${ext}`
-      const { error: upErr } = await supabase.storage
-        .from('medical-docs')
-        .upload(path, newMedicalFile, { upsert: true })
-      setUploadingDoc(false)
-      if (upErr) {
+      const path = `medical-docs/${userId}/medical_${Date.now()}.${ext}`
+      try {
+        docUrl = await uploadFile(path, newMedicalFile)
+      } catch (upErr: any) {
         console.warn('Upload failed:', upErr.message)
-      } else {
-        const { data: urlData } = supabase.storage
-          .from('medical-docs')
-          .getPublicUrl(path)
-        docUrl = urlData.publicUrl
       }
+      setUploadingDoc(false)
     }
 
     // Calculate BMI and BMR
@@ -158,42 +151,42 @@ function Profile() {
     const bmr = calculateBMR(form.weight, form.weight_unit, form.height, form.height_unit, form.age, form.gender)
 
     setSaving(true)
-    const { error: dbErr } = await supabase.from('profiles').update({
-      full_name:           form.full_name.trim() || null,
-      age:                 form.age ? Number(form.age) : null,
-      gender:              form.gender || null,
-      weight:              form.weight ? Number(form.weight) : null,
-      weight_unit:         form.weight_unit,
-      height:              form.height ? Number(form.height) : null,
-      height_unit:         form.height_unit,
-      bmi:                 bmi,
-      bmr:                 bmr,
-      water_intake:        form.water_intake || null,
-      eating_habits:       form.eating_habits || null,
-      food_allergies:      form.food_allergies.trim() || null,
-      workout_level:       form.workout_level || null,
-      has_medical_history: form.has_medical_history,
-      medical_doc_url:     docUrl || null,
-    }).eq('id', userId)
-
-    // Sync name into auth user_metadata so it reflects everywhere (nav, greeting, initials)
-    if (!dbErr && form.full_name.trim()) {
-      await supabase.auth.updateUser({
-        data: { full_name: form.full_name.trim() },
+    try {
+      await updateProfile(userId, {
+        full_name:           form.full_name.trim() || null,
+        age:                 form.age ? Number(form.age) : null,
+        gender:              form.gender || null,
+        weight:              form.weight ? Number(form.weight) : null,
+        weight_unit:         form.weight_unit,
+        height:              form.height ? Number(form.height) : null,
+        height_unit:         form.height_unit,
+        bmi:                 bmi,
+        bmr:                 bmr,
+        water_intake:        form.water_intake || null,
+        eating_habits:       form.eating_habits || null,
+        food_allergies:      form.food_allergies.trim() || null,
+        workout_level:       form.workout_level || null,
+        has_medical_history: form.has_medical_history,
+        medical_doc_url:     docUrl || null,
       })
-    }
 
-    setSaving(false)
+      // Sync name into auth user so it reflects everywhere (nav, greeting, initials)
+      if (form.full_name.trim() && auth.currentUser) {
+        await updateAuthProfile(auth.currentUser, {
+          displayName: form.full_name.trim(),
+        })
+      }
 
-    if (dbErr) {
-      setError('Failed to save: ' + dbErr.message)
-    } else {
       const updatedForm = { ...form, medical_doc_url: docUrl, bmi, bmr }
       setForm(updatedForm)
       setOriginal(updatedForm)
       setNewMedicalFile(null)
       setSuccess(true)
       setTimeout(() => setSuccess(false), 3000)
+    } catch (dbErr: any) {
+      setError('Failed to save: ' + dbErr.message)
+    } finally {
+      setSaving(false)
     }
   }
 

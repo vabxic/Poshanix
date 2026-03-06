@@ -37,7 +37,7 @@ docker run --env-file .env -p 3001:3001 poshanix-server
 
 4. After deployment:
 - Add the deployed server URL to your frontend `VITE_AI_API_BASE`.
-- Update OAuth / Supabase redirect URIs to point at your deployed frontend origin and (if used) any redirect helper endpoints.
+- Update OAuth redirect URIs (in the Firebase console) to point at your deployed frontend origin and (if used) any redirect helper endpoints.
 
 If your Render service is reachable at `https://poshanix.onrender.com`:
 - Set your frontend `VITE_AI_API_BASE` (at build time or in your frontend host) to `https://poshanix.onrender.com` so the app will call the correct AI proxy.

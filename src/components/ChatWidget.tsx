@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { supabase } from '../lib/supabase'
+import { auth, getProfile } from '../lib/firebase'
 import './ChatWidget.css'
 
 const API_BASE = (import.meta.env.VITE_AI_API_BASE as string) || 'https://poshanix.onrender.com'
@@ -30,17 +30,13 @@ export default function ChatWidget() {
   // Load user profile data
   useEffect(() => {
     const loadProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      const currentUser = auth.currentUser
+      if (!currentUser) return
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('age, gender, weight, weight_unit, height, height_unit, bmi, bmr, water_intake, eating_habits, food_allergies, workout_level')
-        .eq('id', user.id)
-        .single()
+      const profile = await getProfile(currentUser.uid)
 
       if (profile) {
-        setUserProfile(profile)
+        setUserProfile(profile as UserProfile)
       }
     }
     loadProfile()
@@ -71,14 +67,24 @@ export default function ChatWidget() {
       let aiResponse = ''
       
       // Check if response is plain text
-      const contentType = res.headers.get('content-type')
-      if (contentType?.includes('text/plain')) {
-        aiResponse = await res.text()
+      const contentType = res.headers.get('content-type') || ''
+      if (contentType.includes('text/plain')) {
+        const text = await res.text()
+        if (!res.ok) {
+          aiResponse = friendlyServerError(text, res.status)
+        } else {
+          aiResponse = text
+        }
       } else {
         const data = await res.json()
-        
+
+        if (!res.ok) {
+          // Server returned a structured error
+          const errMsg = data?.error?.message || data?.error || `Server error ${res.status}`
+          aiResponse = friendlyServerError(String(errMsg), res.status)
+        }
         // Google Gemini format: candidates[0].content.parts[0].text
-        if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+        else if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
           aiResponse = data.candidates[0].content.parts[0].text
         }
         // OpenAI format: choices[0].message.content
@@ -87,7 +93,7 @@ export default function ChatWidget() {
         }
         // Fallback to error message in data
         else if (data?.error) {
-          aiResponse = `Error: ${data.error.message || String(data.error)}`
+          aiResponse = friendlyServerError(data.error.message || String(data.error), res.status)
         }
         // Last resort
         else {
@@ -97,10 +103,21 @@ export default function ChatWidget() {
       
       setMessages(m => [...m, { role: 'assistant', content: aiResponse }])
     } catch (err) {
-      setMessages(m => [...m, { role: 'assistant', content: 'Error contacting AI: ' + String(err) }])
+      const errStr = String(err)
+      setMessages(m => [...m, { role: 'assistant', content: friendlyServerError(errStr, 0) }])
     } finally {
       setLoading(false)
     }
+  }
+
+  function friendlyServerError(msg: string, status: number): string {
+    if (status === 503 || /not configured|GEMINI_API_KEY|administrator/i.test(msg))
+      return 'The AI service is not available right now. Please try again later or contact support.'
+    if (status === 429 || /high demand|rate limit|quota|overloaded/i.test(msg))
+      return 'The AI service is experiencing high demand. Please wait a moment and try again.'
+    if (status >= 500)
+      return 'The AI server encountered an error. Please try again in a moment.'
+    return 'Error: ' + msg
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {

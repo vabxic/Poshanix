@@ -15,7 +15,7 @@ A Vite + React + TypeScript app that scans food labels (OCR), sends OCR text to 
 - Styling: Tailwind CSS, styled-components, tailwindcss-animate
 - OCR: Tesseract.js
 - AI proxy: Node.js server in `server/index.js` (for Gemini/OpenAI calls)
-- DB / migrations: Supabase migrations present in `supabase/migrations`
+- DB / Auth / Storage: Firebase (Firestore, Firebase Auth, Firebase Storage)
 
 ## Quickstart
 
@@ -55,7 +55,13 @@ Server (.env in `server/`):
 - `GEMINI_API_ENDPOINT` — optional custom endpoint
 - `PORT` — server port (default 3001)
 
-Frontend: You can provide a `.env` file at the project root if using runtime configuration; check the code for any `import.meta.env` usages.
+Frontend (`.env` at project root):
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
 
 ## Server endpoints (local proxy)
 - POST `/api/gemini/ocr` — body: `{ text }` (OCR output). Returns parsed JSON nutrition object or a helper status message:
@@ -75,8 +81,8 @@ Key server code: [server/index.js](server/index.js)
 - Animated icon: [src/components/animate-ui/icons/message-square-more.tsx](src/components/animate-ui/icons/message-square-more.tsx)
 - Tailwind configuration: [tailwind.config.cjs](tailwind.config.cjs)
 
-## Supabase migrations
-See the `supabase/migrations` folder for SQL migrations used to create and update the `profiles` table and onboarding fields.
+## Firebase
+User data is stored in Firestore under the `profiles` collection. Files (e.g. medical documents) are stored in Firebase Storage. See [src/lib/firebase.ts](src/lib/firebase.ts) for all database and storage functions.
 
 ## Scripts
 Use the scripts defined in `package.json`:

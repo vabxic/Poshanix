@@ -1,5 +1,15 @@
-import { useState, type FormEvent } from 'react'
-import { supabase } from '../lib/supabase'
+import { useState, useEffect, type FormEvent } from 'react'
+import {
+  signInWithPassword,
+  signUp,
+  sendMagicLink,
+  signInWithGoogle,
+  signInWithGithub,
+  getSignInMethodsForEmail,
+  getProfile,
+  updateProfile,
+  onAuthChange,
+} from '../lib/firebase'
 import { useNavigate } from 'react-router-dom'
 import { useTheme } from '../lib/useTheme'
 import ThemeSwitch from '../components/Switch'
@@ -38,6 +48,24 @@ function Auth() {
   const [message, setMessage] = useState('')
   const [magicLinkSent, setMagicLinkSent] = useState(false)
 
+  /* ---- Redirect already-authenticated users ---- */
+  useEffect(() => {
+    const unsubscribe = onAuthChange(async (currentUser) => {
+      if (!currentUser) return
+      try {
+        const profile = await getProfile(currentUser.uid)
+        if (!profile?.onboarding_completed) {
+          navigate('/onboarding')
+        } else {
+          navigate('/home')
+        }
+      } catch {
+        navigate('/home')
+      }
+    })
+    return () => unsubscribe()
+  }, [navigate])
+
   const resetState = (newTab: Tab) => {
     setTab(newTab)
     setError('')
@@ -55,20 +83,19 @@ function Auth() {
     if (!email || !password) return
     setError('')
     setLoading(true)
-    const { error, data } = await supabase.auth.signInWithPassword({ email, password })
-    setLoading(false)
-    if (error) { setError(error.message); return }
-    // Check onboarding status
-    const userId = data.user?.id
-    if (userId) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('onboarding_completed')
-        .eq('id', userId)
-        .single()
-      if (!profile?.onboarding_completed) { navigate('/onboarding'); return }
+    try {
+      const userCredential = await signInWithPassword(email, password)
+      const userId = userCredential.user?.uid
+      if (userId) {
+        const profile = await getProfile(userId)
+        if (!profile?.onboarding_completed) { navigate('/onboarding'); return }
+      }
+      navigate('/home')
+    } catch (err: any) {
+      setError(err.message || 'Sign in failed')
+    } finally {
+      setLoading(false)
     }
-    navigate('/home')
   }
 
   /* ---- Sign Up ---- */
@@ -80,16 +107,15 @@ function Auth() {
     setError('')
     setMessage('')
     setLoading(true)
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/home`,
-      },
-    })
-    setLoading(false)
-    if (error) setError(error.message)
-    else setMessage('Check your email for a confirmation link!')
+    try {
+      await signUp(email, password)
+      setMessage('Account created! You can now sign in.')
+      navigate('/onboarding')
+    } catch (err: any) {
+      setError(err.message || 'Sign up failed')
+    } finally {
+      setLoading(false)
+    }
   }
 
   /* ---- Magic Link ---- */
@@ -97,39 +123,71 @@ function Auth() {
     if (!email) { setError('Enter your email address first.'); return }
     setError('')
     setLoading(true)
-    const { data, error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: true,
-        emailRedirectTo: `${window.location.origin}/home`,
-      },
-    })
-    console.log('signInWithOtp result:', { data, error })
-    setLoading(false)
-    if (error) {
-      const msg = error.message || JSON.stringify(error)
-      // Provide actionable guidance for common server-side failure (SMTP / redirect misconfig)
-      if (msg.toLowerCase().includes('error sending magic link')) {
-        setError(
-          'Failed to send magic link — check your Supabase project SMTP (Auth → Settings → SMTP),\n' +
-          'and ensure your Redirect URLs / Site URL include this origin. Server: ' + msg
-        )
-      } else {
-        setError(msg)
-      }
-    } else setMagicLinkSent(true)
+    try {
+      const redirectUrl = `${window.location.origin}/home`
+      await sendMagicLink(email, redirectUrl)
+      // Store email for completing magic link sign-in
+      window.localStorage.setItem('emailForSignIn', email)
+      setMagicLinkSent(true)
+    } catch (err: any) {
+      const msg = err.message || 'Failed to send magic link'
+      setError(msg)
+    } finally {
+      setLoading(false)
+    }
   }
 
   /* ---- OAuth ---- */
   const handleOAuth = async (provider: 'google' | 'github') => {
     setError('')
-    const redirectTo = `${window.location.origin}/home`
-
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo },
-    })
-    if (error) setError(error.message)
+    setLoading(true)
+    try {
+      const result = provider === 'google'
+        ? await signInWithGoogle()
+        : await signInWithGithub()
+      const userId = result.user.uid
+      const profile = await getProfile(userId)
+      if (!profile) {
+        await updateProfile(userId, {
+          email: result.user.email,
+          onboarding_completed: false,
+          created_at: new Date().toISOString(),
+        })
+        navigate('/onboarding')
+      } else if (!profile.onboarding_completed) {
+        navigate('/onboarding')
+      } else {
+        navigate('/home')
+      }
+    } catch (err: any) {
+      if (err.code === 'auth/account-exists-with-different-credential') {
+        const email = err.customData?.email as string | undefined
+        if (email) {
+          try {
+            const methods = await getSignInMethodsForEmail(email)
+            const friendly: Record<string, string> = {
+              'password': 'email & password',
+              'google.com': 'Google',
+              'github.com': 'GitHub',
+              'emailLink': 'magic link (email)',
+            }
+            const usedMethod = methods.map(m => friendly[m] ?? m).join(' or ')
+            setError(
+              `This email is already registered via ${usedMethod}. ` +
+              `Please sign in using that method instead.`
+            )
+          } catch {
+            setError('An account already exists with this email using a different sign-in method.')
+          }
+        } else {
+          setError('An account already exists with this email using a different sign-in method.')
+        }
+      } else {
+        setError(err.message || 'OAuth sign in failed')
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (

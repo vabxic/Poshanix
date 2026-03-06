@@ -53,14 +53,14 @@ function Privacy() {
 
           <section>
             <h2>3. Data Storage</h2>
-            <p>Your data is stored securely using Supabase infrastructure. We retain your account data for as long as your account is active. You may request deletion of your account and associated data at any time by contacting us.</p>
+            <p>Your data is stored securely using Firebase infrastructure. We retain your account data for as long as your account is active. You may request deletion of your account and associated data at any time by contacting us.</p>
           </section>
 
           <section>
             <h2>4. Third-Party Services</h2>
             <p>Poshanix uses the following third-party services which have their own privacy policies:</p>
             <ul>
-              <li><strong>Supabase</strong> — authentication and database hosting.</li>
+              <li><strong>Firebase</strong> — authentication, database, and storage hosting.</li>
               <li><strong>Google / GitHub OAuth</strong> — optional sign-in providers.</li>
             </ul>
           </section>
