@@ -90,15 +90,30 @@ export default function FoodChatWidget({ parsed, aiInsight }: FoodChatWidgetProp
 
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value, { stream: true })
+      let pending = ''
+      let rafId: number | null = null
+
+      const flush = () => {
+        rafId = null
+        if (!pending) return
+        const text = pending
+        pending = ''
         setMessages(m => {
           const arr = [...m]
-          arr[arr.length - 1] = { ...arr[arr.length - 1], content: arr[arr.length - 1].content + chunk }
+          arr[arr.length - 1] = { ...arr[arr.length - 1], content: arr[arr.length - 1].content + text }
           return arr
         })
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          if (rafId !== null) cancelAnimationFrame(rafId)
+          flush()
+          break
+        }
+        pending += decoder.decode(value, { stream: true })
+        if (rafId === null) rafId = requestAnimationFrame(flush)
       }
     } catch {
       setMessages(m => [...m, { role: 'assistant', content: 'Unable to reach the AI service. Please try again later.' }])
