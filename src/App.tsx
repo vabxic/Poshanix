@@ -9,22 +9,48 @@ import Privacy from './legal/Privacy'
 import Terms from './legal/Terms'
 import { useTheme } from './lib/useTheme'
 import ThemeSwitch from './components/Switch'
+import Carousel, { type CarouselItem } from './component/Carousel'
 import RotatingText from './component/RotatingText'
+import Button from './component/button'
 import './App.css'
 
 function Landing() {
   const navigate = useNavigate()
   const [theme, toggleTheme] = useTheme()
+  const featureItems: CarouselItem[] = [
+    {
+      id: 1,
+      icon: <span className="feature-carousel-emoji">📸</span>,
+      title: 'Scan Any Label',
+      description: 'Point your camera at any nutrition label, packaged food, restaurant menus, or upload a photo.'
+    },
+    {
+      id: 2,
+      icon: <span className="feature-carousel-emoji">🤖</span>,
+      title: 'AI Interpretation',
+      description: 'Our AI instantly reads, extracts, and interprets full nutritional data with remarkable accuracy.'
+    },
+    {
+      id: 3,
+      icon: <span className="feature-carousel-emoji">📊</span>,
+      title: 'Health Metrics',
+      description: 'Track BMI, BMR, calorie intake, macros, and trends in one clean dashboard.'
+    },
+    {
+      id: 4,
+      icon: <span className="feature-carousel-emoji">🎯</span>,
+      title: 'Personalised Goals',
+      description: 'Set custom calorie targets, hydration goals, and dietary preferences tailored just for you.'
+    }
+  ]
 
   return (
     <div className="page landing-page">
+
       {/* Nav */}
       <nav className="nav landing-nav">
         <span className="nav-logo">&#x1F33F; Poshanix</span>
-        <div className="landing-nav-right">
-          <ThemeSwitch checked={theme === 'dark'} onToggle={toggleTheme} />
-          <button className="landing-signin-btn" onClick={() => navigate('/auth')}>Sign In</button>
-        </div>
+        <ThemeSwitch checked={theme === 'dark'} onToggle={toggleTheme} />
       </nav>
 
       {/* Hero */}
@@ -60,13 +86,7 @@ function Landing() {
           </p>
 
           <div className="hero-ctas">
-            <button className="cta-btn cta-primary" onClick={() => navigate('/auth')}>
-              Get Started Free
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
-            </button>
-            <button className="cta-btn cta-secondary" onClick={() => navigate('/auth')}>
-              Sign In
-            </button>
+            <Button onClick={() => navigate('/auth')} />
           </div>
 
           <div className="hero-pills">
@@ -81,27 +101,15 @@ function Landing() {
       <section className="landing-section landing-features">
         <p className="landing-eyebrow">What you get</p>
         <h2 className="landing-section-title">Everything you need to eat better</h2>
-        <div className="features-grid">
-          <div className="feature-card-landing feature-card-accent">
-            <div className="feature-icon-wrap">📸</div>
-            <h3>Scan Any Label</h3>
-            <p>Point your camera at any nutrition label — packaged food, restaurant menus, or upload a photo.</p>
-          </div>
-          <div className="feature-card-landing">
-            <div className="feature-icon-wrap">🤖</div>
-            <h3>AI Interpretation</h3>
-            <p>Our AI instantly reads, extracts, and interprets full nutritional data with remarkable accuracy.</p>
-          </div>
-          <div className="feature-card-landing">
-            <div className="feature-icon-wrap">📊</div>
-            <h3>Health Metrics</h3>
-            <p>Track BMI, BMR, calorie intake, macros, and trends — everything in one clean dashboard.</p>
-          </div>
-          <div className="feature-card-landing">
-            <div className="feature-icon-wrap">🎯</div>
-            <h3>Personalised Goals</h3>
-            <p>Set custom calorie targets, hydration goals, and dietary preferences tailored just for you.</p>
-          </div>
+        <div className="features-carousel-wrap">
+          <Carousel
+            items={featureItems}
+            baseWidth={380}
+            autoplay
+            autoplayDelay={3500}
+            pauseOnHover
+            loop
+          />
         </div>
       </section>
 
@@ -134,20 +142,7 @@ function Landing() {
         </div>
       </section>
 
-      {/* CTA Banner */}
-      <section className="landing-cta-banner">
-        <div className="landing-orb cta-banner-orb" aria-hidden="true" />
-        <div className="cta-banner-inner">
-          <div className="cta-banner-text">
-            <h2 className="cta-banner-title">Ready to eat smarter?</h2>
-            <p className="cta-banner-sub">Join Poshanix today — free, fast, and built for your health.</p>
-          </div>
-          <button className="cta-btn cta-primary cta-banner-btn" onClick={() => navigate('/auth')}>
-            Get Started Free
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
-          </button>
-        </div>
-      </section>
+     
 
       {/* Footer */}
       <footer className="footer landing-footer">

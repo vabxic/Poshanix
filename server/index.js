@@ -64,13 +64,15 @@ async function callAI(messages, model = process.env.GEMINI_MODEL || 'gpt-3.5-tur
   // If configured to use Google Generative Language (Gemini), call that API format
   const useGoogle = GEMINI_API_TYPE === 'google' || GEMINI_ENDPOINT.includes('generativelanguage.googleapis.com')
 
-  // Permanent errors: wrong API key, billing, auth — no point retrying
+  // Permanent errors: wrong API key, auth — no point retrying
+  // NOTE: 429 is never permanent even if the body mentions "billing" (quota exceeded = retryable/backoff)
   function isPermanentError(bodyText, status) {
+    if (status === 429) return false   // quota / rate-limit — always retryable
     if (status === 400 || status === 401 || status === 403) return true
     if (!bodyText) return false
     const t = String(bodyText).toLowerCase()
     return t.includes('api key not valid') || t.includes('invalid api key') || t.includes('api_key_invalid')
-      || t.includes('permission denied') || t.includes('billing') || t.includes('unauthorized')
+      || t.includes('permission denied') || t.includes('unauthorized')
   }
 
   // Retryable errors: rate-limited, overloaded, server-side temporary failures

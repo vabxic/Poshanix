@@ -14,7 +14,7 @@ import {
   onAuthStateChanged,
   type User,
 } from 'firebase/auth'
-import { getFirestore, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore'
+import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, getDocs, deleteDoc, Timestamp } from 'firebase/firestore'
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 
 // TODO: Replace with your Firebase project configuration
@@ -115,5 +115,26 @@ export const onAuthChange = (callback: (user: User | null) => void) =>
   onAuthStateChanged(auth, callback)
 
 export const getCurrentUser = () => auth.currentUser
+
+// Saved food analyses
+export const saveFoodAnalysis = async (userId: string, analysis: Record<string, unknown>) => {
+  const colRef = collection(db, 'profiles', userId, 'saved_analyses')
+  const docRef = await addDoc(colRef, {
+    ...analysis,
+    saved_at: Timestamp.now(),
+  })
+  return docRef.id
+}
+
+export const getSavedAnalyses = async (userId: string) => {
+  const colRef = collection(db, 'profiles', userId, 'saved_analyses')
+  const q = query(colRef, orderBy('saved_at', 'desc'))
+  const snap = await getDocs(q)
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+}
+
+export const deleteSavedAnalysis = async (userId: string, analysisId: string) => {
+  await deleteDoc(doc(db, 'profiles', userId, 'saved_analyses', analysisId))
+}
 
 export type { User }

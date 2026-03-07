@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { onAuthChange, signOutUser, getProfile } from '../lib/firebase'
+import { onAuthChange, signOutUser, getProfile, getSavedAnalyses, deleteSavedAnalysis } from '../lib/firebase'
 import { useTheme } from '../lib/useTheme'
 import ThemeSwitch from '../components/Switch'
 import Loader from '../components/loader'
@@ -36,6 +36,8 @@ function Home() {
   const [ocrSentToAi, setOcrSentToAi] = useState(false)
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const [savedAnalyses, setSavedAnalyses] = useState<any[]>([])
+  const [loadingSaved, setLoadingSaved] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const [currentTime, setCurrentTime] = useState(new Date())
 
@@ -68,6 +70,24 @@ function Home() {
     })
     return () => unsubscribe()
   }, [navigate])
+
+  // Load saved analyses when user is available
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    ;(async () => {
+      setLoadingSaved(true)
+      try {
+        const list = await getSavedAnalyses(user.uid)
+        if (!cancelled) setSavedAnalyses(list)
+      } catch (e) {
+        console.error('Failed to load saved analyses', e)
+      } finally {
+        if (!cancelled) setLoadingSaved(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [user])
 
   const API_BASE = (import.meta.env.VITE_AI_API_BASE as string) || 'https://poshanix.onrender.com'
 
@@ -296,22 +316,44 @@ function Home() {
               </span>
             </div>
 
-            <div className="feature-card feature-disabled">
+            <div className="feature-card nutrition-log-card">
               <div className="feature-card-top">
                 <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Food/Green%20Salad.png" alt="Nutrition Log" width="48" height="48" />
               </div>
               <h3>Nutrition Log</h3>
-              <p>Track your daily intake and monitor macro goals over time.</p>
-              <span className="coming-soon-badge">Coming Soon</span>
-            </div>
-
-            <div className="feature-card feature-disabled">
-              <div className="feature-card-top">
-                <img src="https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Travel%20and%20places/Bullseye.png" alt="Goals" width="48" height="48" />
-              </div>
-              <h3>Goals</h3>
-              <p>Set personalized calorie and macro targets tailored just for you.</p>
-              <span className="coming-soon-badge">Coming Soon</span>
+              {loadingSaved ? (
+                <p className="nutrition-log-dim">Loading…</p>
+              ) : savedAnalyses.length === 0 ? (
+                <p className="nutrition-log-dim">No saved analyses yet. Save an analysis from the Food page after scanning.</p>
+              ) : (
+                <div className="nutrition-log-list">
+                  {savedAnalyses.map((s, i) => {
+                    const savedAt = s.saved_at && s.saved_at.toDate ? s.saved_at.toDate() : (s.saved_at ? new Date(s.saved_at) : null)
+                    const label = s.parsed?.ingredients?.join(', ') || s.parsed?.cleaned_text || ''
+                    const snippet = label.length > 60 ? label.slice(0, 58) + '…' : label
+                    const hs = s.parsed?.health_score ?? s.parsed?.healthScore ?? null
+                    return (
+                      <div key={s.id || i} className="nutrition-log-item">
+                        <div className="nutrition-log-main">
+                          <div className="nutrition-log-title">{snippet || 'Saved analysis'}</div>
+                          <div className="nutrition-log-meta">{savedAt ? savedAt.toLocaleDateString() : ''}{hs ? ` • ${hs}/100` : ''}</div>
+                        </div>
+                        <div className="nutrition-log-actions">
+                          <button className="small-btn" onClick={() => navigate('/food', { state: { parsed: s.parsed, ai_insight: s.ai_insight } })}>View</button>
+                          <button className="small-btn small-btn-danger" onClick={async () => {
+                            if (!user) return
+                            if (!confirm('Delete this saved analysis?')) return
+                            try {
+                              await deleteSavedAnalysis(user.uid, s.id)
+                              setSavedAnalyses(prev => prev.filter(p => p.id !== s.id))
+                            } catch (e) { console.error('Delete failed', e) }
+                          }}>✕</button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </section>
