@@ -63,13 +63,12 @@ export default function ChatWidget() {
       })
 
       if (!res.ok) {
-        const text = await res.text()
         let errMsg: string
         try {
-          const data = JSON.parse(text)
+          const data = await res.json()
           errMsg = friendlyServerError(data?.error?.message || data?.error || `Server error ${res.status}`, res.status)
         } catch {
-          errMsg = friendlyServerError(text, res.status)
+          errMsg = friendlyServerError(`Server error ${res.status}`, res.status)
         }
         setMessages(m => [...m, { role: 'assistant', content: errMsg }])
         return
@@ -90,9 +89,8 @@ export default function ChatWidget() {
           return arr
         })
       }
-    } catch (err) {
-      const errStr = String(err)
-      setMessages(m => [...m, { role: 'assistant', content: friendlyServerError(errStr, 0) }])
+    } catch {
+      setMessages(m => [...m, { role: 'assistant', content: 'Unable to reach the AI service. Please try again later.' }])
     } finally {
       setLoading(false)
     }

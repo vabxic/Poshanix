@@ -401,67 +401,20 @@ app.post('/api/gemini/chat/stream', async (req, res) => {
     const useGoogle = GEMINI_API_TYPE === 'google' || GEMINI_ENDPOINT.includes('generativelanguage.googleapis.com')
     const useOpenRouter = GEMINI_API_TYPE === 'openrouter'
 
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-    res.setHeader('Cache-Control', 'no-cache')
-    res.setHeader('X-Accel-Buffering', 'no')
-    res.flushHeaders()
-
-    async function pipeSSE(aiRes) {
-      if (!aiRes.ok) {
-        const errText = await aiRes.text()
-        res.write(`Error: ${errText.slice(0, 200)}`)
-        return
-      }
-      let buffer = ''
-      for await (const chunk of aiRes.body) {
-        buffer += chunk.toString()
-        const lines = buffer.split('\n')
-        buffer = lines.pop()
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') continue
-          try {
-            const parsed = JSON.parse(data)
-            const text =
-              parsed?.candidates?.[0]?.content?.parts?.[0]?.text ||
-              parsed?.choices?.[0]?.delta?.content ||
-              ''
-            if (text) res.write(text)
-          } catch (e) { /* incomplete chunk, skip */ }
-        }
-      }
-      // flush any remaining buffered line
-      if (buffer.startsWith('data: ')) {
-        const data = buffer.slice(6).trim()
-        if (data && data !== '[DONE]') {
-          try {
-            const parsed = JSON.parse(data)
-            const text =
-              parsed?.candidates?.[0]?.content?.parts?.[0]?.text ||
-              parsed?.choices?.[0]?.delta?.content ||
-              ''
-            if (text) res.write(text)
-          } catch (e) { /* ignore */ }
-        }
-      }
-    }
-
+    // Perform the upstream request BEFORE flushing headers so we can still
+    // return a proper HTTP error status if the upstream rejects us.
+    let aiRes
     if (useGoogle) {
       const rawModel = model.replace(/^models\//, '')
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${rawModel}:streamGenerateContent?alt=sse&key=${GEMINI_KEY}`
       const prompt = msgs.map(m => (m.content || '')).join('\n')
-      const aiRes = await fetch(url, {
+      aiRes = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       })
-      await pipeSSE(aiRes)
-      return res.end()
-    }
-
-    if (useOpenRouter) {
-      const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    } else if (useOpenRouter) {
+      aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -471,20 +424,68 @@ app.post('/api/gemini/chat/stream', async (req, res) => {
         },
         body: JSON.stringify({ model, messages: msgs, stream: true })
       })
-      await pipeSSE(aiRes)
-      return res.end()
+    } else {
+      aiRes = await fetch(GEMINI_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GEMINI_KEY}`
+        },
+        body: JSON.stringify({ model, messages: msgs, stream: true })
+      })
     }
 
-    // OpenAI-compatible
-    const aiRes = await fetch(GEMINI_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GEMINI_KEY}`
-      },
-      body: JSON.stringify({ model, messages: msgs, stream: true })
-    })
-    await pipeSSE(aiRes)
+    // If upstream returned an error, forward it as a proper HTTP error before streaming starts
+    if (!aiRes.ok) {
+      const errText = await aiRes.text()
+      let errMsg = errText
+      try {
+        const parsed = JSON.parse(errText)
+        errMsg = parsed?.error?.message || parsed?.error || errText
+      } catch (e) { /* not JSON */ }
+      const status = aiRes.status === 429 ? 429 : aiRes.status >= 500 ? 502 : aiRes.status
+      return res.status(status).json({ error: String(errMsg).slice(0, 400) })
+    }
+
+    // All good — commit to streaming
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('X-Accel-Buffering', 'no')
+    res.flushHeaders()
+
+    let buffer = ''
+    for await (const chunk of aiRes.body) {
+      buffer += chunk.toString()
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const data = line.slice(6).trim()
+        if (data === '[DONE]') continue
+        try {
+          const parsed = JSON.parse(data)
+          const text =
+            parsed?.candidates?.[0]?.content?.parts?.[0]?.text ||
+            parsed?.choices?.[0]?.delta?.content ||
+            ''
+          if (text) res.write(text)
+        } catch (e) { /* incomplete chunk */ }
+      }
+    }
+    // flush any remaining buffered SSE line
+    if (buffer.startsWith('data: ')) {
+      const data = buffer.slice(6).trim()
+      if (data && data !== '[DONE]') {
+        try {
+          const parsed = JSON.parse(data)
+          const text =
+            parsed?.candidates?.[0]?.content?.parts?.[0]?.text ||
+            parsed?.choices?.[0]?.delta?.content ||
+            ''
+          if (text) res.write(text)
+        } catch (e) { /* ignore */ }
+      }
+    }
     return res.end()
   } catch (err) {
     console.error('Stream chat error:', err && err.message ? err.message : err)

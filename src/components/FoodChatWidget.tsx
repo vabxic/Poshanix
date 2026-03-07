@@ -74,13 +74,12 @@ export default function FoodChatWidget({ parsed, aiInsight }: FoodChatWidgetProp
       })
 
       if (!res.ok) {
-        const text = await res.text()
         let errMsg: string
         try {
-          const data = JSON.parse(text)
+          const data = await res.json()
           errMsg = friendlyError(data?.error?.message || data?.error || `Server error ${res.status}`, res.status)
         } catch {
-          errMsg = friendlyError(text, res.status)
+          errMsg = friendlyError(`Server error ${res.status}`, res.status)
         }
         setMessages(m => [...m, { role: 'assistant', content: errMsg }])
         return

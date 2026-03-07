@@ -1,1 +1,1 @@
-export const AI_API_BASE = 'https://poshanix.onrender.com'
+export const AI_API_BASE = import.meta.env.VITE_AI_API_BASE || 'https://poshanix.onrender.com'
