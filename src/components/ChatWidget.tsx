@@ -53,54 +53,43 @@ export default function ChatWidget() {
     setInput('')
     setLoading(true)
     try {
-      const res = await fetch(`${AI_API_BASE}/api/gemini/chat`, {
+      const res = await fetch(`${AI_API_BASE}/api/gemini/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           message: userMsg.content,
-          userProfile: userProfile 
+          userProfile: userProfile
         })
       })
-      
-      // Handle different API response formats
-      let aiResponse = ''
-      
-      // Check if response is plain text
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('text/plain')) {
-        const text = await res.text()
-        if (!res.ok) {
-          aiResponse = friendlyServerError(text, res.status)
-        } else {
-          aiResponse = text
-        }
-      } else {
-        const data = await res.json()
 
-        if (!res.ok) {
-          // Server returned a structured error
-          const errMsg = data?.error?.message || data?.error || `Server error ${res.status}`
-          aiResponse = friendlyServerError(String(errMsg), res.status)
+      if (!res.ok) {
+        const text = await res.text()
+        let errMsg: string
+        try {
+          const data = JSON.parse(text)
+          errMsg = friendlyServerError(data?.error?.message || data?.error || `Server error ${res.status}`, res.status)
+        } catch {
+          errMsg = friendlyServerError(text, res.status)
         }
-        // Google Gemini format: candidates[0].content.parts[0].text
-        else if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-          aiResponse = data.candidates[0].content.parts[0].text
-        }
-        // OpenAI format: choices[0].message.content
-        else if (data?.choices?.[0]?.message?.content) {
-          aiResponse = data.choices[0].message.content
-        }
-        // Fallback to error message in data
-        else if (data?.error) {
-          aiResponse = friendlyServerError(data.error.message || String(data.error), res.status)
-        }
-        // Last resort
-        else {
-          aiResponse = 'Sorry, I received an unexpected response format. Please try again.'
-        }
+        setMessages(m => [...m, { role: 'assistant', content: errMsg }])
+        return
       }
-      
-      setMessages(m => [...m, { role: 'assistant', content: aiResponse }])
+
+      setMessages(m => [...m, { role: 'assistant', content: '' }])
+      setLoading(false)
+
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        setMessages(m => {
+          const arr = [...m]
+          arr[arr.length - 1] = { ...arr[arr.length - 1], content: arr[arr.length - 1].content + chunk }
+          return arr
+        })
+      }
     } catch (err) {
       const errStr = String(err)
       setMessages(m => [...m, { role: 'assistant', content: friendlyServerError(errStr, 0) }])

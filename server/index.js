@@ -365,6 +365,136 @@ app.post('/api/gemini/chat', async (req, res) => {
   }
 })
 
+app.post('/api/gemini/chat/stream', async (req, res) => {
+  const activeKey = GEMINI_API_TYPE === 'openrouter' ? OPENROUTER_KEY : GEMINI_KEY
+  if (!activeKey) {
+    return res.status(503).json({ error: 'AI service is not configured on this server (API key missing). Please contact the administrator.' })
+  }
+  try {
+    const { messages, message, userProfile } = req.body
+    if (!messages && !message) return res.status(400).json({ error: 'missing messages or message' })
+
+    let contextMessage = 'You are a helpful nutrition and health assistant. Provide concise, friendly, and supportive advice.'
+    if (userProfile) {
+      const profile = []
+      if (userProfile.age) profile.push(`Age: ${userProfile.age} years`)
+      if (userProfile.gender) profile.push(`Gender: ${userProfile.gender}`)
+      if (userProfile.weight && userProfile.weight_unit) profile.push(`Weight: ${userProfile.weight} ${userProfile.weight_unit}`)
+      if (userProfile.height && userProfile.height_unit) profile.push(`Height: ${userProfile.height} ${userProfile.height_unit}`)
+      if (userProfile.bmi) profile.push(`BMI: ${userProfile.bmi}`)
+      if (userProfile.bmr) profile.push(`BMR: ${userProfile.bmr} kcal/day`)
+      if (userProfile.water_intake) profile.push(`Daily water intake: ${userProfile.water_intake}`)
+      if (userProfile.eating_habits) profile.push(`Eating habits: ${userProfile.eating_habits.replace(/_/g, ' ')}`)
+      if (userProfile.food_allergies) profile.push(`Food allergies: ${userProfile.food_allergies}`)
+      if (userProfile.workout_level) profile.push(`Workout level: ${userProfile.workout_level}`)
+      if (profile.length > 0) {
+        contextMessage = `You are a helpful nutrition and health assistant. Here is the user's health profile:\n\n${profile.join('\n')}\n\nUse this information to provide personalized nutrition and health advice. Be concise, friendly, and supportive.`
+      }
+    }
+
+    const msgs = messages || [
+      { role: 'system', content: contextMessage },
+      { role: 'user', content: message }
+    ]
+
+    const model = process.env.GEMINI_MODEL || 'gpt-3.5-turbo'
+    const useGoogle = GEMINI_API_TYPE === 'google' || GEMINI_ENDPOINT.includes('generativelanguage.googleapis.com')
+    const useOpenRouter = GEMINI_API_TYPE === 'openrouter'
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('X-Accel-Buffering', 'no')
+    res.flushHeaders()
+
+    async function pipeSSE(aiRes) {
+      if (!aiRes.ok) {
+        const errText = await aiRes.text()
+        res.write(`Error: ${errText.slice(0, 200)}`)
+        return
+      }
+      let buffer = ''
+      for await (const chunk of aiRes.body) {
+        buffer += chunk.toString()
+        const lines = buffer.split('\n')
+        buffer = lines.pop()
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (data === '[DONE]') continue
+          try {
+            const parsed = JSON.parse(data)
+            const text =
+              parsed?.candidates?.[0]?.content?.parts?.[0]?.text ||
+              parsed?.choices?.[0]?.delta?.content ||
+              ''
+            if (text) res.write(text)
+          } catch (e) { /* incomplete chunk, skip */ }
+        }
+      }
+      // flush any remaining buffered line
+      if (buffer.startsWith('data: ')) {
+        const data = buffer.slice(6).trim()
+        if (data && data !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(data)
+            const text =
+              parsed?.candidates?.[0]?.content?.parts?.[0]?.text ||
+              parsed?.choices?.[0]?.delta?.content ||
+              ''
+            if (text) res.write(text)
+          } catch (e) { /* ignore */ }
+        }
+      }
+    }
+
+    if (useGoogle) {
+      const rawModel = model.replace(/^models\//, '')
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${rawModel}:streamGenerateContent?alt=sse&key=${GEMINI_KEY}`
+      const prompt = msgs.map(m => (m.content || '')).join('\n')
+      const aiRes = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      })
+      await pipeSSE(aiRes)
+      return res.end()
+    }
+
+    if (useOpenRouter) {
+      const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${OPENROUTER_KEY}`,
+          'HTTP-Referer': 'https://poshanix.onrender.com',
+          'X-Title': 'Poshanix'
+        },
+        body: JSON.stringify({ model, messages: msgs, stream: true })
+      })
+      await pipeSSE(aiRes)
+      return res.end()
+    }
+
+    // OpenAI-compatible
+    const aiRes = await fetch(GEMINI_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GEMINI_KEY}`
+      },
+      body: JSON.stringify({ model, messages: msgs, stream: true })
+    })
+    await pipeSSE(aiRes)
+    return res.end()
+  } catch (err) {
+    console.error('Stream chat error:', err && err.message ? err.message : err)
+    if (!res.headersSent) {
+      return res.status(500).json({ error: String(err) })
+    }
+    res.end()
+  }
+})
+
 // Basic root and health endpoints so the public URL can return a quick status
 app.get('/', (req, res) => {
   res.status(200).send('Poshanix AI proxy — running')

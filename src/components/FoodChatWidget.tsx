@@ -67,33 +67,40 @@ export default function FoodChatWidget({ parsed, aiInsight }: FoodChatWidgetProp
         ...chatHistory.map(m => ({ role: m.role, content: m.content })),
       ]
 
-      const res = await fetch(`${AI_API_BASE}/api/gemini/chat`, {
+      const res = await fetch(`${AI_API_BASE}/api/gemini/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: apiMessages })
       })
 
-      let aiResponse = ''
-      const contentType = res.headers.get('content-type') || ''
-      if (contentType.includes('text/plain')) {
+      if (!res.ok) {
         const text = await res.text()
-        aiResponse = !res.ok ? friendlyError(text, res.status) : text
-      } else {
-        const data = await res.json()
-        if (!res.ok) {
-          aiResponse = friendlyError(data?.error?.message || data?.error || `Server error ${res.status}`, res.status)
-        } else if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-          aiResponse = data.candidates[0].content.parts[0].text
-        } else if (data?.choices?.[0]?.message?.content) {
-          aiResponse = data.choices[0].message.content
-        } else if (data?.error) {
-          aiResponse = friendlyError(data.error.message || String(data.error), res.status)
-        } else {
-          aiResponse = 'Sorry, I received an unexpected response. Please try again.'
+        let errMsg: string
+        try {
+          const data = JSON.parse(text)
+          errMsg = friendlyError(data?.error?.message || data?.error || `Server error ${res.status}`, res.status)
+        } catch {
+          errMsg = friendlyError(text, res.status)
         }
+        setMessages(m => [...m, { role: 'assistant', content: errMsg }])
+        return
       }
 
-      setMessages(m => [...m, { role: 'assistant', content: aiResponse }])
+      setMessages(m => [...m, { role: 'assistant', content: '' }])
+      setLoading(false)
+
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        setMessages(m => {
+          const arr = [...m]
+          arr[arr.length - 1] = { ...arr[arr.length - 1], content: arr[arr.length - 1].content + chunk }
+          return arr
+        })
+      }
     } catch {
       setMessages(m => [...m, { role: 'assistant', content: 'Unable to reach the AI service. Please try again later.' }])
     } finally {
