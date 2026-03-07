@@ -5,6 +5,7 @@ import { Pie } from 'react-chartjs-2'
 import Loader from '../components/loader'
 import FoodChatWidget from '../components/FoodChatWidget'
 import { auth, saveFoodAnalysis } from '../lib/firebase'
+import { AI_API_BASE } from '../lib/api'
 import './Food.css'
 
 ChartJS.register(ArcElement, Tooltip, Legend)
@@ -69,8 +70,6 @@ export default function Food() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
-  const API_BASE = (import.meta.env.VITE_AI_API_BASE as string) || 'https://poshanix.onrender.com'
-
   const handleSave = async () => {
     const user = auth.currentUser
     if (!user || !parsed) return
@@ -97,7 +96,7 @@ export default function Food() {
     ;(async () => {
       setLoading(true)
       try {
-        const res = await fetch(`${API_BASE}/api/gemini/ocr`, {
+        const res = await fetch(`${AI_API_BASE}/api/gemini/ocr`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: parsed.cleaned_text })

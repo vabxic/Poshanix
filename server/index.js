@@ -9,10 +9,12 @@ app.use(cors())
 app.use(express.json({ limit: '1mb' }))
 
 const GEMINI_KEY = process.env.GEMINI_API_KEY
-if (!GEMINI_KEY) console.warn('Warning: GEMINI_API_KEY not set in environment')
-
-const GEMINI_ENDPOINT = process.env.GEMINI_API_ENDPOINT || 'https://api.openai.com/v1/chat/completions'
+const OPENROUTER_KEY = process.env.OPEN_ROUTER_API_KEY
 const GEMINI_API_TYPE = (process.env.GEMINI_API_TYPE || '').toLowerCase()
+const GEMINI_ENDPOINT = process.env.GEMINI_API_ENDPOINT || 'https://api.openai.com/v1/chat/completions'
+
+if (GEMINI_API_TYPE === 'openrouter' && !OPENROUTER_KEY) console.warn('Warning: OPEN_ROUTER_API_KEY not set in environment')
+else if (GEMINI_API_TYPE !== 'openrouter' && !GEMINI_KEY) console.warn('Warning: GEMINI_API_KEY not set in environment')
 
 const SYSTEM_INSTRUCTION = `You are a medical and nutrition data processing assistant.
 You are a medical and nutrition data processing assistant.
@@ -87,9 +89,43 @@ async function callAI(messages, model = process.env.GEMINI_MODEL || 'gpt-3.5-tur
 
   const MAX_RETRIES = 3
 
+  const useOpenRouter = GEMINI_API_TYPE === 'openrouter'
+
   for (const m of models) {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
+        if (useOpenRouter) {
+          const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${OPENROUTER_KEY}`,
+              'HTTP-Referer': 'https://poshanix.onrender.com',
+              'X-Title': 'Poshanix'
+            },
+            body: JSON.stringify({ model: m, messages, max_tokens: 800 })
+          })
+          const text = await res.text()
+          let json = null
+          try { json = JSON.parse(text) } catch (e) { /* not json */ }
+          if (!res.ok) {
+            const errBody = text || (json && json.error && json.error.message) || ''
+            if (isPermanentError(errBody, res.status)) {
+              console.error(`OpenRouter model ${m} permanent error [${res.status}]:`, String(errBody).slice(0, 300))
+              throw Object.assign(new Error(`AI API permanent error [${res.status}]: ${String(errBody).slice(0, 200)}`), { permanent: true })
+            }
+            if (isRetryableErrorBody(errBody, res.status)) {
+              const delay = Math.min(1000 * Math.pow(2, attempt), 8000)
+              console.warn(`OpenRouter model ${m} attempt ${attempt + 1} retryable [${res.status}], retrying in ${delay}ms`)
+              if (attempt < MAX_RETRIES - 1) { await new Promise(r => setTimeout(r, delay)); continue }
+              break
+            }
+            console.warn(`OpenRouter model ${m} unknown error [${res.status}]:`, String(errBody).slice(0, 300))
+            break
+          }
+          return json || text
+        }
+
         if (useGoogle) {
           // Google Generative Language expects a different JSON shape. We'll post to
           // models/{model}:generateContent with `contents: [{ parts: [{ text }] }]`.
@@ -225,8 +261,9 @@ function isNutritionText(text) {
 }
 
 app.post('/api/gemini/ocr', async (req, res) => {
-  if (!GEMINI_KEY) {
-    return res.status(503).json({ error: 'AI service is not configured on this server (GEMINI_API_KEY missing). Please contact the administrator.' })
+  const activeKey = GEMINI_API_TYPE === 'openrouter' ? OPENROUTER_KEY : GEMINI_KEY
+  if (!activeKey) {
+    return res.status(503).json({ error: 'AI service is not configured on this server (API key missing). Please contact the administrator.' })
   }
   try {
     const { text } = req.body
@@ -267,8 +304,9 @@ app.post('/api/gemini/ocr', async (req, res) => {
 })
 
 app.post('/api/gemini/chat', async (req, res) => {
-  if (!GEMINI_KEY) {
-    return res.status(503).json({ error: 'AI service is not configured on this server (GEMINI_API_KEY missing). Please contact the administrator.' })
+  const activeKey = GEMINI_API_TYPE === 'openrouter' ? OPENROUTER_KEY : GEMINI_KEY
+  if (!activeKey) {
+    return res.status(503).json({ error: 'AI service is not configured on this server (API key missing). Please contact the administrator.' })
   }
   try {
     const { messages, message, userProfile } = req.body

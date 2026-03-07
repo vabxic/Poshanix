@@ -17,6 +17,11 @@ import {
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, addDoc, query, orderBy, getDocs, deleteDoc, Timestamp } from 'firebase/firestore'
 import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 
+type SavedAnalysisRecord = Record<string, unknown> & {
+  id: string
+  saved_at: Timestamp | string
+}
+
 // TODO: Replace with your Firebase project configuration
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'YOUR_API_KEY',
@@ -116,25 +121,91 @@ export const onAuthChange = (callback: (user: User | null) => void) =>
 
 export const getCurrentUser = () => auth.currentUser
 
+const isPermissionDeniedError = (error: unknown) =>
+  typeof error === 'object' &&
+  error !== null &&
+  'code' in error &&
+  (error as { code?: string }).code === 'permission-denied'
+
+const getProfileRef = (userId: string) => doc(db, 'profiles', userId)
+
+const generateSavedAnalysisId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `saved-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+const getEmbeddedSavedAnalyses = async (userId: string): Promise<SavedAnalysisRecord[]> => {
+  const profileSnap = await getDoc(getProfileRef(userId))
+  const savedAnalyses = profileSnap.data()?.saved_analyses
+  return Array.isArray(savedAnalyses) ? (savedAnalyses as SavedAnalysisRecord[]) : []
+}
+
+const sortSavedAnalyses = <T extends { saved_at?: Timestamp | string | null }>(items: T[]) =>
+  [...items].sort((left, right) => {
+    const leftTime = left.saved_at instanceof Timestamp
+      ? left.saved_at.toMillis()
+      : left.saved_at
+        ? new Date(left.saved_at).getTime()
+        : 0
+    const rightTime = right.saved_at instanceof Timestamp
+      ? right.saved_at.toMillis()
+      : right.saved_at
+        ? new Date(right.saved_at).getTime()
+        : 0
+    return rightTime - leftTime
+  })
+
 // Saved food analyses
 export const saveFoodAnalysis = async (userId: string, analysis: Record<string, unknown>) => {
   const colRef = collection(db, 'profiles', userId, 'saved_analyses')
-  const docRef = await addDoc(colRef, {
-    ...analysis,
-    saved_at: Timestamp.now(),
-  })
-  return docRef.id
+  try {
+    const docRef = await addDoc(colRef, {
+      ...analysis,
+      saved_at: Timestamp.now(),
+    })
+    return docRef.id
+  } catch (error) {
+    if (!isPermissionDeniedError(error)) throw error
+
+    const savedAnalysis: SavedAnalysisRecord = {
+      id: generateSavedAnalysisId(),
+      ...analysis,
+      saved_at: new Date().toISOString(),
+    }
+    const existing = await getEmbeddedSavedAnalyses(userId)
+    await setDoc(getProfileRef(userId), {
+      id: userId,
+      saved_analyses: [...existing, savedAnalysis],
+    }, { merge: true })
+    return savedAnalysis.id
+  }
 }
 
 export const getSavedAnalyses = async (userId: string) => {
   const colRef = collection(db, 'profiles', userId, 'saved_analyses')
-  const q = query(colRef, orderBy('saved_at', 'desc'))
-  const snap = await getDocs(q)
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  try {
+    const q = query(colRef, orderBy('saved_at', 'desc'))
+    const snap = await getDocs(q)
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  } catch (error) {
+    if (!isPermissionDeniedError(error)) throw error
+    return sortSavedAnalyses(await getEmbeddedSavedAnalyses(userId))
+  }
 }
 
 export const deleteSavedAnalysis = async (userId: string, analysisId: string) => {
-  await deleteDoc(doc(db, 'profiles', userId, 'saved_analyses', analysisId))
+  try {
+    await deleteDoc(doc(db, 'profiles', userId, 'saved_analyses', analysisId))
+  } catch (error) {
+    if (!isPermissionDeniedError(error)) throw error
+    const existing = await getEmbeddedSavedAnalyses(userId)
+    await setDoc(getProfileRef(userId), {
+      id: userId,
+      saved_analyses: existing.filter(analysis => analysis.id !== analysisId),
+    }, { merge: true })
+  }
 }
 
 export type { User }

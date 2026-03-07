@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
+import { AI_API_BASE } from '../lib/api'
 import './ChatWidget.css'
-
-const API_BASE = (import.meta.env.VITE_AI_API_BASE as string) || 'https://poshanix.onrender.com'
 
 interface FoodChatWidgetProps {
   parsed: any
@@ -68,7 +67,7 @@ export default function FoodChatWidget({ parsed, aiInsight }: FoodChatWidgetProp
         ...chatHistory.map(m => ({ role: m.role, content: m.content })),
       ]
 
-      const res = await fetch(`${API_BASE}/api/gemini/chat`, {
+      const res = await fetch(`${AI_API_BASE}/api/gemini/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: apiMessages })

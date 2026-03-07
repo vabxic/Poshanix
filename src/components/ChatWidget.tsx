@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { auth, getProfile } from '../lib/firebase'
+import { AI_API_BASE } from '../lib/api'
 import './ChatWidget.css'
-
-const API_BASE = (import.meta.env.VITE_AI_API_BASE as string) || 'https://poshanix.onrender.com'
 
 interface UserProfile {
   age?: number
@@ -54,7 +53,7 @@ export default function ChatWidget() {
     setInput('')
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/gemini/chat`, {
+      const res = await fetch(`${AI_API_BASE}/api/gemini/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
