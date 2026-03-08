@@ -32,8 +32,11 @@ function Onboarding() {
 
   /* mandatory fields */
   const [age, setAge] = useState('')
+  const [gender, setGender] = useState<'male' | 'female' | ''>('')
   const [weight, setWeight] = useState('')
   const [weightUnit, setWeightUnit] = useState<'kg' | 'lbs'>('kg')
+  const [height, setHeight] = useState('')
+  const [heightUnit, setHeightUnit] = useState<'cm' | 'ft'>('cm')
   const [waterIntake, setWaterIntake] = useState('')
   const [eatingHabits, setEatingHabits] = useState('')
 
@@ -49,7 +52,7 @@ function Onboarding() {
   /* ---- Mandatory submit ---- */
   const handleMandatory = (e: FormEvent) => {
     e.preventDefault()
-    if (!age || !weight || !waterIntake || !eatingHabits) {
+    if (!age || !gender || !weight || !height || !waterIntake || !eatingHabits) {
       setError('Please fill in all required fields.')
       return
     }
@@ -97,10 +100,25 @@ function Onboarding() {
     setError('')
     setSaving(true)
 
+    // Calculate BMI and BMR
+    const weightKg = weightUnit === 'lbs' ? Number(weight) * 0.453592 : Number(weight)
+    const heightM = heightUnit === 'ft' ? Number(height) * 0.3048 : Number(height) / 100
+    const heightCm = heightUnit === 'ft' ? Number(height) * 30.48 : Number(height)
+    const bmi = (weightKg > 0 && heightM > 0) ? Math.round((weightKg / (heightM * heightM)) * 10) / 10 : null
+    let bmr: number | null = null
+    if (weightKg > 0 && heightCm > 0 && Number(age) > 0 && gender) {
+      bmr = Math.round(10 * weightKg + 6.25 * heightCm - 5 * Number(age) + (gender === 'male' ? 5 : -161))
+    }
+
     const payload: Record<string, unknown> = {
       age: Number(age),
+      gender,
       weight: Number(weight),
       weight_unit: weightUnit,
+      height: Number(height),
+      height_unit: heightUnit,
+      bmi,
+      bmr,
       water_intake: waterIntake,
       eating_habits: eatingHabits,
       has_medical_history: hasMedicalHistory ?? false,
@@ -197,6 +215,24 @@ function Onboarding() {
                 required
               />
 
+              {/* Gender */}
+              <label className="field-label"><span className="label-icon"></span> Gender</label>
+              <div className="chip-group">
+                {[
+                  { value: 'male',   label: 'Male',   icon: '' },
+                  { value: 'female', label: 'Female', icon: '' },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    className={`chip ${gender === opt.value ? 'chip-active' : ''}`}
+                    onClick={() => setGender(opt.value as 'male' | 'female')}
+                  >
+                    <span className="chip-icon">{opt.icon}</span> {opt.label}
+                  </button>
+                ))}
+              </div>
+
               {/* Weight */}
               <label className="field-label"><span className="label-icon"></span> Weight</label>
               <div className="weight-row">
@@ -224,6 +260,37 @@ function Onboarding() {
                     onClick={() => setWeightUnit('lbs')}
                   >
                     lbs
+                  </button>
+                </div>
+              </div>
+
+              {/* Height */}
+              <label className="field-label"><span className="label-icon"></span> Height</label>
+              <div className="weight-row">
+                <input
+                  className="auth-input weight-input"
+                  type="number"
+                  placeholder={heightUnit === 'cm' ? 'e.g. 170' : 'e.g. 5.7'}
+                  step="0.1"
+                  min={1}
+                  value={height}
+                  onChange={(e) => setHeight(e.target.value)}
+                  required
+                />
+                <div className="unit-toggle">
+                  <button
+                    type="button"
+                    className={`unit-btn ${heightUnit === 'cm' ? 'unit-active' : ''}`}
+                    onClick={() => setHeightUnit('cm')}
+                  >
+                    cm
+                  </button>
+                  <button
+                    type="button"
+                    className={`unit-btn ${heightUnit === 'ft' ? 'unit-active' : ''}`}
+                    onClick={() => setHeightUnit('ft')}
+                  >
+                    ft
                   </button>
                 </div>
               </div>

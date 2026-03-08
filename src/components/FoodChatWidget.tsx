@@ -90,30 +90,45 @@ export default function FoodChatWidget({ parsed, aiInsight }: FoodChatWidgetProp
 
       const reader = res.body!.getReader()
       const decoder = new TextDecoder()
-      let pending = ''
-      let rafId: number | null = null
-
-      const flush = () => {
-        rafId = null
-        if (!pending) return
-        const text = pending
-        pending = ''
-        setMessages(m => {
-          const arr = [...m]
-          arr[arr.length - 1] = { ...arr[arr.length - 1], content: arr[arr.length - 1].content + text }
-          return arr
-        })
-      }
+      let buffer = ''
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) {
-          if (rafId !== null) cancelAnimationFrame(rafId)
-          flush()
+          if (buffer) {
+            const remaining = buffer
+            setMessages(m => {
+              const arr = [...m]
+              arr[arr.length - 1] = { ...arr[arr.length - 1], content: arr[arr.length - 1].content + remaining }
+              return arr
+            })
+          }
           break
         }
-        pending += decoder.decode(value, { stream: true })
-        if (rafId === null) rafId = requestAnimationFrame(flush)
+        buffer += decoder.decode(value, { stream: true })
+        // Flush line by line for a smooth streaming feel
+        const lines = buffer.split('\n')
+        if (lines.length > 1) {
+          const toFlush = lines.slice(0, -1).join('\n') + '\n'
+          buffer = lines[lines.length - 1]
+          const text = toFlush
+          setMessages(m => {
+            const arr = [...m]
+            arr[arr.length - 1] = { ...arr[arr.length - 1], content: arr[arr.length - 1].content + text }
+            return arr
+          })
+          await new Promise(r => setTimeout(r, 30))
+        } else if (buffer.length > 80) {
+          // Also flush long runs without newlines
+          const text = buffer
+          buffer = ''
+          setMessages(m => {
+            const arr = [...m]
+            arr[arr.length - 1] = { ...arr[arr.length - 1], content: arr[arr.length - 1].content + text }
+            return arr
+          })
+          await new Promise(r => setTimeout(r, 30))
+        }
       }
     } catch {
       setMessages(m => [...m, { role: 'assistant', content: 'Unable to reach the AI service. Please try again later.' }])

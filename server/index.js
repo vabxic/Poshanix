@@ -17,7 +17,6 @@ if (GEMINI_API_TYPE === 'openrouter' && !OPENROUTER_KEY) console.warn('Warning: 
 else if (GEMINI_API_TYPE !== 'openrouter' && !GEMINI_KEY) console.warn('Warning: GEMINI_API_KEY not set in environment')
 
 const SYSTEM_INSTRUCTION = `You are a medical and nutrition data processing assistant.
-You are a medical and nutrition data processing assistant.
 
 INPUT CONTEXT:
 You will receive RAW OCR text extracted from food labels or ingredient lists.
@@ -58,7 +57,7 @@ RESPONSE STYLE:
 OUTPUT FORMAT: Return STRICT JSON with keys: cleaned_text, nutrition_facts, ingredients, medical_nutrition_advice.
 Any violation of format or rules is considered a failure.`
 
-async function callAI(messages, model = process.env.GEMINI_MODEL || 'gpt-3.5-turbo') {
+async function callAI(messages, model = process.env.GEMINI_MODEL || 'arcee-ai/trinity-large-preview:free') {
   // Support a primary model plus comma-separated fallback list in env var GEMINI_FALLBACK_MODELS
   const fallback = (process.env.GEMINI_FALLBACK_MODELS || '').split(',').map(s => s.trim()).filter(Boolean)
   const models = [model].concat(fallback)
@@ -103,7 +102,7 @@ async function callAI(messages, model = process.env.GEMINI_MODEL || 'gpt-3.5-tur
               'HTTP-Referer': 'https://poshanix.onrender.com',
               'X-Title': 'Poshanix'
             },
-            body: JSON.stringify({ model: m, messages, max_tokens: 800 })
+            body: JSON.stringify({ model: m, messages, max_tokens: 4096 })
           })
           const text = await res.text()
           let json = null
@@ -133,8 +132,14 @@ async function callAI(messages, model = process.env.GEMINI_MODEL || 'gpt-3.5-tur
           const modelName = rawModel.replace(/^models\//, '')
           const url = `${process.env.GEMINI_API_ENDPOINT || `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`}${process.env.GEMINI_API_KEY ? `?key=${process.env.GEMINI_API_KEY}` : ''}`
 
-          const prompt = messages.map(mm => (mm.content || '')).join('\n')
-          const body = { contents: [{ parts: [{ text: prompt }] }] }
+          // Separate system instruction from user messages for Gemini API
+          const systemParts = messages.filter(mm => mm.role === 'system').map(mm => ({ text: mm.content || '' }))
+          const userParts = messages.filter(mm => mm.role !== 'system').map(mm => ({ text: mm.content || '' }))
+          const body = {
+            ...(systemParts.length > 0 ? { systemInstruction: { parts: systemParts } } : {}),
+            contents: [{ parts: userParts.length > 0 ? userParts : [{ text: '' }] }],
+            generationConfig: { responseMimeType: 'application/json' }
+          }
 
           const res = await fetch(url, {
             method: 'POST',
@@ -170,7 +175,7 @@ async function callAI(messages, model = process.env.GEMINI_MODEL || 'gpt-3.5-tur
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${GEMINI_KEY}`
           },
-          body: JSON.stringify({ model: m, messages, max_tokens: 800 })
+          body: JSON.stringify({ model: m, messages, max_tokens: 4096 })
         })
 
         const text = await res.text()
@@ -231,6 +236,34 @@ function extractAssistantText(aiResponse) {
     try {
       const msg = aiResponse.choices[0].message || aiResponse.choices[0]
       if (msg && (msg.content || msg.text)) return msg.content || msg.text || ''
+      // Some reasoning models put output in reasoning/reasoning_details when content is null
+      if (msg && !msg.content) {
+        const reasoning = msg.reasoning || ''
+        const details = Array.isArray(msg.reasoning_details)
+          ? msg.reasoning_details.map(d => d.text || '').join('')
+          : ''
+        const reasoningText = reasoning || details
+        if (reasoningText) {
+          // Try to extract the last complete JSON block from the reasoning text
+          const jsonBlocks = reasoningText.match(/```json\s*\n([\s\S]*?)\n\s*```/g)
+          if (jsonBlocks && jsonBlocks.length > 0) {
+            const last = jsonBlocks[jsonBlocks.length - 1]
+            const inner = last.replace(/^```json\s*\n?/, '').replace(/\n?\s*```$/, '').trim()
+            try { JSON.parse(inner); return inner } catch (e) { /* not valid JSON, try others */ }
+            // Try the first block if last didn't parse
+            if (jsonBlocks.length > 1) {
+              const first = jsonBlocks[0]
+              const firstInner = first.replace(/^```json\s*\n?/, '').replace(/\n?\s*```$/, '').trim()
+              try { JSON.parse(firstInner); return firstInner } catch (e) {}
+            }
+          }
+          // Try to find raw JSON object in reasoning
+          const jsonMatch = reasoningText.match(/\{[\s\S]*"cleaned_text"[\s\S]*\}/)
+          if (jsonMatch) {
+            try { JSON.parse(jsonMatch[0]); return jsonMatch[0] } catch (e) {}
+          }
+        }
+      }
     } catch (e) {}
   }
 
@@ -254,9 +287,17 @@ function extractAssistantText(aiResponse) {
   }
 }
 
+function stripMarkdownFences(text) {
+  if (!text) return text
+  // Remove ```json ... ``` or ``` ... ``` wrappers that AI models often add
+  const match = text.match(/^\s*```(?:json)?\s*\n?([\s\S]*?)\n?\s*```\s*$/)
+  if (match) return match[1].trim()
+  return text
+}
+
 function isNutritionText(text) {
   if (!text) return false
-  const re = /calori|serving|ingredient|protein|fat|carbohydrat|sodium|vitamin|calcium|iron|fiber|sugar/i
+  const re = /calori|serving|ingredient|protein|fat|carbohydrat|sodium|vitamin|calcium|iron|fiber|sugar|nutrition_facts|cleaned_text/i
   return re.test(text)
 }
 
@@ -275,7 +316,10 @@ app.post('/api/gemini/ocr', async (req, res) => {
     ]
 
     const data = await callAI(messages)
-    const assistantText = extractAssistantText(data).trim()
+    let assistantText = extractAssistantText(data).trim()
+
+    // Strip markdown code fences that AI models often wrap JSON in
+    assistantText = stripMarkdownFences(assistantText)
 
     // If the assistant did not return nutrition-related content, return waiting JSON exactly
     if (!isNutritionText(assistantText)) {
@@ -397,7 +441,7 @@ app.post('/api/gemini/chat/stream', async (req, res) => {
       { role: 'user', content: message }
     ]
 
-    const model = process.env.GEMINI_MODEL || 'gpt-3.5-turbo'
+    const model = process.env.GEMINI_MODEL || 'arcee-ai/trinity-large-preview:free'
     const useGoogle = GEMINI_API_TYPE === 'google' || GEMINI_ENDPOINT.includes('generativelanguage.googleapis.com')
     const useOpenRouter = GEMINI_API_TYPE === 'openrouter'
 
@@ -422,7 +466,7 @@ app.post('/api/gemini/chat/stream', async (req, res) => {
           'HTTP-Referer': 'https://poshanix.onrender.com',
           'X-Title': 'Poshanix'
         },
-        body: JSON.stringify({ model, messages: msgs, stream: true })
+        body: JSON.stringify({ model, messages: msgs, stream: true, max_tokens: 4096 })
       })
     } else {
       aiRes = await fetch(GEMINI_ENDPOINT, {

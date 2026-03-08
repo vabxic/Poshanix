@@ -105,7 +105,16 @@ export default function Food() {
         if (contentType.includes('application/json')) {
           const data = await res.json()
           if (!cancelled) {
+            // Don't replace parsed data if the server returned a waiting/error status
+            if (data && data.status === 'waiting_for_food_ocr') {
+              console.warn('Server returned waiting_for_food_ocr — OCR text may not contain food data')
+              setLoading(false)
+              return
+            }
             setParsed(data)
+            if (data) {
+              setAiInsight(formatAiInsightValue(data))
+            }
             if (data && (data.ai_insight || data.ai_text || data.advice_text || data.assistant_text)) {
               const raw = data.ai_insight || data.ai_text || data.advice_text || data.assistant_text
               setAiInsight(formatAiInsightValue(raw))
