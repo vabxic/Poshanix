@@ -1110,3 +1110,52 @@
 .small-btn:hover { transform: translateY(-1px); }
 .small-btn-danger { border-color: rgba(239,68,68,0.12); color: #ef4444; }
 .small-btn-danger:hover { background: rgba(239,68,68,0.04); }
+
+/* Nutrition log mobile layout fix */
+@media (max-width: 640px) {
+  .nutrition-log-list {
+    max-height: 260px;
+  }
+
+  .nutrition-log-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.55rem;
+  }
+
+  .nutrition-log-main {
+    max-width: 100%;
+  }
+
+  .nutrition-log-title {
+    white-space: normal;
+    word-break: break-word;
+    line-height: 1.35;
+  }
+
+  .nutrition-log-meta {
+    line-height: 1.35;
+  }
+
+  .nutrition-log-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 420px) {
+  .nutrition-log-actions {
+    justify-content: stretch;
+    gap: 0.4rem;
+  }
+
+  .nutrition-log-actions .small-btn {
+    flex: 1;
+    text-align: center;
+    padding: 0.45rem 0.55rem;
+  }
+
+  .nutrition-log-actions .small-btn-danger {
+    flex: 0 0 44px;
+  }
+}

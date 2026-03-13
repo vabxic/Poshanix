@@ -207,6 +207,10 @@
   border-left: 3px solid #0ea5e9;
 }
 
+.food-card-medical {
+  border-left: 3px solid #10b981;
+}
+
 .food-card-title {
   font-size: 0.95rem;
   font-weight: 700;
@@ -321,6 +325,54 @@
 
 [data-theme="dark"] .food-insight-text {
   color: #9ca3af;
+}
+
+/* ── Medical Advice ── */
+.food-medical-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.food-medical-item {
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: #ecfdf5;
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+}
+
+[data-theme="dark"] .food-medical-item {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.food-medical-condition {
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.45px;
+  color: #065f46;
+  background: rgba(16, 185, 129, 0.2);
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+}
+
+[data-theme="dark"] .food-medical-condition {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.2);
+}
+
+.food-medical-advice {
+  margin: 0.55rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: #065f46;
+  white-space: pre-wrap;
+}
+
+[data-theme="dark"] .food-medical-advice {
+  color: #a7f3d0;
 }
 
 /* ── Chart card ── */

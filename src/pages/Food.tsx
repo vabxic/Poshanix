@@ -19,6 +19,32 @@ function extractValue(n: any): string | null {
   return String(n)
 }
 
+function sanitizeInsightText(input: string): string {
+  let text = input.trim()
+  if (!text) return ''
+
+  // Handle escaped new lines from serialized responses.
+  text = text.replace(/\\r\\n|\\n|\\r/g, '\n')
+
+  // Remove markdown code fences if the model wrapped the response.
+  text = text.replace(/^```(?:json|markdown|md|text)?\s*/i, '').replace(/```$/i, '').trim()
+
+  // Strip markdown emphasis and heading markers for cleaner plain-text display.
+  text = text
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
+    .replace(/^[-*]\s+/gm, '- ')
+
+  // Normalize excessive spacing while preserving readable paragraphs.
+  text = text
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+
+  return text
+}
+
 export default function Food() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -29,7 +55,27 @@ export default function Food() {
 
   function formatAiInsightValue(val: any) {
     if (!val) return null
-    if (typeof val === 'string') return val
+    if (typeof val === 'string') {
+      const raw = val.trim()
+      if (!raw) return null
+
+      // Some API responses persist insight as stringified JSON.
+      const maybeJson = raw
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/```$/i, '')
+        .trim()
+
+      if ((maybeJson.startsWith('{') && maybeJson.endsWith('}')) || (maybeJson.startsWith('[') && maybeJson.endsWith(']'))) {
+        try {
+          const parsedJson = JSON.parse(maybeJson)
+          return formatAiInsightValue(parsedJson)
+        } catch {
+          // Keep going with text sanitization.
+        }
+      }
+
+      return sanitizeInsightText(raw)
+    }
     try {
       const nf = val.nutrition_facts || val.nutritionFacts || {}
       const lines: string[] = []
@@ -49,20 +95,17 @@ export default function Food() {
           if (value !== null && value !== undefined) lines.push(`${label}: ${value}`)
         }
       }
-      if (val.cleaned_text) {
-        lines.push('', 'Detected Text:', val.cleaned_text)
+
+      const directInsight = val.ai_insight || val.ai_text || val.assistant_text || val.summary || val.insight
+      if (typeof directInsight === 'string' && directInsight.trim()) {
+        lines.push('', 'AI Insight:')
+        lines.push(sanitizeInsightText(directInsight))
       }
-      if (Array.isArray(val.medical_nutrition_advice) && val.medical_nutrition_advice.length) {
-        lines.push('', 'Medical Nutrition Advice:')
-        val.medical_nutrition_advice.slice(0, 5).forEach((a: any) => {
-          if (typeof a === 'string') lines.push(`- ${a}`)
-          else if (a && a.condition && a.advice) lines.push(`- ${a.condition}: ${a.advice}`)
-        })
-      }
+
       if (lines.length === 0) return JSON.stringify(val, null, 2)
-      return lines.join('\n')
+      return sanitizeInsightText(lines.join('\n'))
     } catch {
-      try { return JSON.stringify(val, null, 2) } catch { return String(val) }
+      try { return sanitizeInsightText(JSON.stringify(val, null, 2)) } catch { return sanitizeInsightText(String(val)) }
     }
   }
 
@@ -115,8 +158,8 @@ export default function Food() {
             if (data) {
               setAiInsight(formatAiInsightValue(data))
             }
-            if (data && (data.ai_insight || data.ai_text || data.advice_text || data.assistant_text)) {
-              const raw = data.ai_insight || data.ai_text || data.advice_text || data.assistant_text
+            if (data && (data.ai_insight || data.ai_text || data.assistant_text || data.summary || data.insight)) {
+              const raw = data.ai_insight || data.ai_text || data.assistant_text || data.summary || data.insight
               setAiInsight(formatAiInsightValue(raw))
             }
           }
@@ -125,7 +168,7 @@ export default function Food() {
           const next = { ...parsed, medical_nutrition_advice: [{ condition: 'AI', advice: text.trim() }] }
           if (!cancelled) {
             setParsed(next)
-            setAiInsight(text.trim())
+            setAiInsight(null)
           }
         }
       } catch (e) {
@@ -155,7 +198,6 @@ export default function Food() {
 
   const nf = parsed.nutrition_facts || {}
   const ingredients: string[] | null = parsed.ingredients || null
-  const advice = parsed.medical_nutrition_advice || []
   const healthScore = parsed.health_score ?? parsed.healthScore ?? null
 
   /* ── Extract a numeric nutrient value from various AI response shapes ── */
@@ -194,6 +236,43 @@ export default function Food() {
   }
 
   const allergens = extractAllergens(parsed.cleaned_text ?? null, ingredients)
+
+  interface MedicalAdviceItem {
+    condition: string
+    advice: string
+  }
+
+  const medicalAdvice = useMemo<MedicalAdviceItem[]>(() => {
+    const items = parsed?.medical_nutrition_advice
+    if (!Array.isArray(items)) return []
+
+    return items
+      .map((item: any, index: number) => {
+        if (typeof item === 'string') {
+          const cleaned = sanitizeInsightText(item)
+          if (!cleaned) return null
+          const splitAt = cleaned.indexOf(':')
+          if (splitAt > 0 && splitAt < 45) {
+            return {
+              condition: cleaned.slice(0, splitAt).trim(),
+              advice: cleaned.slice(splitAt + 1).trim(),
+            }
+          }
+          return { condition: `Advice ${index + 1}`, advice: cleaned }
+        }
+
+        if (item && typeof item === 'object') {
+          const condition = sanitizeInsightText(String(item.condition ?? item.title ?? item.topic ?? `Advice ${index + 1}`))
+          const adviceText = item.advice ?? item.text ?? item.recommendation ?? item.details
+          const advice = sanitizeInsightText(typeof adviceText === 'string' ? adviceText : String(adviceText ?? ''))
+          if (!advice) return null
+          return { condition: condition || `Advice ${index + 1}`, advice }
+        }
+
+        return null
+      })
+      .filter((x: MedicalAdviceItem | null): x is MedicalAdviceItem => Boolean(x))
+  }, [parsed])
 
   /* ══════════════════════════════════════════════
      SMART HEALTH WARNINGS ENGINE
@@ -489,13 +568,21 @@ export default function Food() {
               </section>
             )}
 
-            {/* AI Insight */}
-            {aiInsight && (
-              <section className="food-card food-card-insight">
-                <h2 className="food-card-title">💡 AI Insight</h2>
-                <p className="food-insight-text">{aiInsight}</p>
+            {/* Medical Advice */}
+            {medicalAdvice.length > 0 && (
+              <section className="food-card food-card-medical">
+                <h2 className="food-card-title">🩺 Medical Advice</h2>
+                <div className="food-medical-list">
+                  {medicalAdvice.map((item, i) => (
+                    <div key={i} className="food-medical-item">
+                      <div className="food-medical-condition">{item.condition}</div>
+                      <p className="food-medical-advice">{item.advice}</p>
+                    </div>
+                  ))}
+                </div>
               </section>
             )}
+
           </div>
 
           {/* RIGHT COLUMN — Ingredients Pie chart */}

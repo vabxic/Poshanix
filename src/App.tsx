@@ -8,6 +8,7 @@ import Onboarding from './pages/Onboarding'
 import Privacy from './legal/Privacy'
 import Terms from './legal/Terms'
 import { useTheme } from './lib/useTheme'
+import GitButton from './component/git_button'
 import ThemeSwitch from './components/Switch'
 import Carousel, { type CarouselItem } from './component/Carousel'
 import RotatingText from './component/RotatingText'
@@ -153,6 +154,9 @@ function Landing() {
         <span className="footer-link" onClick={() => navigate('/privacy')}>Privacy Policy</span>
         <span className="footer-dot">·</span>
         <span className="footer-link" onClick={() => navigate('/terms')}>Terms of Service</span>
+        <span className="footer-dot">·</span>
+        <GitButton href="https://github.com/vabxic" label="@vabxic" />
+        <GitButton href="https://github.com/HitarthSingh" label="@HitarthSingh" />
       </footer>
     </div>
   )
